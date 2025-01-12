@@ -85,6 +85,64 @@ struct Vertex {
     }
 };
 
+// Uniform Buffers
+struct UniformBufferObject {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
+};
+
+struct Goober {
+    // bind resources to memory
+    std::string TexturePath;
+    std::string ModelPath;
+
+    VkImage texture;
+    VkDeviceMemory textureMemory;
+    VkImageView textureView;
+    std::vector<Vertex> verts;
+    VkBuffer vertBuff;
+    VkDeviceMemory vertMem;
+    std::vector<uint16_t> inds;
+    VkBuffer indBuff;
+    VkDeviceMemory indMem;
+
+    std::vector<VkBuffer> uniformBuffers; // one for each frame in flight
+    std::vector<VkDeviceMemory> uniformBuffersMemory;
+    std::vector<void*> uniformBuffersMapped;
+
+    //Descriptor Sets
+    VkDescriptorSetLayout descriptorSetLayout;
+    VkDescriptorPool descriptorPool;
+    std::vector<VkDescriptorSet> descriptorSets;
+
+    void KILL_GOOBER(VkDevice dev,uint32_t MFIF) {
+        for (size_t i = 0; i < MFIF; i++) {
+            vkDestroyBuffer(dev, uniformBuffers[i], nullptr);
+            vkFreeMemory(dev, uniformBuffersMemory[i], nullptr);
+        }
+
+        vkDestroyDescriptorPool(dev, descriptorPool, nullptr);
+
+        vkDestroyImageView(dev, textureView, nullptr);
+
+        vkDestroyImage(dev, texture, nullptr);
+        vkFreeMemory(dev, textureMemory, nullptr);
+
+        vkDestroyDescriptorSetLayout(dev, descriptorSetLayout, nullptr);
+
+        vkDestroyBuffer(dev, indBuff, nullptr);
+        vkFreeMemory(dev, indMem, nullptr);
+
+        vkDestroyBuffer(dev, vertBuff, nullptr);
+        vkFreeMemory(dev, vertMem, nullptr);
+    }
+
+    void CREATE_GOOBER() {
+
+    }
+};
+
 class HelloTriangleApplication {
 public:
     void run() {
@@ -98,6 +156,8 @@ public:
     }
 
 private: // Where all functions and Vulkan objects will be stored
+    // !!! GOOBER ZONE!!!
+    Goober Head;
     // Vulkan objects and variables (in order of being written):
     GLFWwindow* window;
     VkInstance instance;
@@ -121,9 +181,6 @@ private: // Where all functions and Vulkan objects will be stored
     std::vector<VkImageView> swapChainImageViews; // image view stuff
 
     //rendering
-    VkDescriptorSetLayout descriptorSetLayout;
-    VkDescriptorPool descriptorPool;
-    std::vector<VkDescriptorSet> descriptorSets;
     VkPipelineLayout pipelineLayout;
     VkRenderPass renderPass;
     VkPipeline graphicsPipeline;
@@ -134,11 +191,8 @@ private: // Where all functions and Vulkan objects will be stored
     VkImageView depthImageView;
 
     // textures
-    VkImage textureImage;
-    VkImageView textureImageView;
-    VkDeviceMemory textureImageMemory;
     VkSampler textureSampler;
-
+    VkDescriptorSetLayout descriptorSetLayout;
     // frame buffers
     std::vector<VkFramebuffer> swapChainFramebuffers;
     
@@ -269,13 +323,6 @@ private: // Where all functions and Vulkan objects will be stored
     const std::vector<uint16_t> indices = {
     0, 1, 2, 2, 3, 0,
     4, 5, 6, 6, 7, 4
-    };
-
-    // Uniform Buffers
-    struct UniformBufferObject {
-        glm::mat4 model;
-        glm::mat4 view;
-        glm::mat4 proj;
     };
 
     // Functions (in order of being written):
@@ -854,7 +901,7 @@ private: // Where all functions and Vulkan objects will be stored
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
-        pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+        pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout; // GALUNGA
 
         if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
             throw std::runtime_error("failed to create pipeline layout!");
@@ -1061,7 +1108,7 @@ private: // Where all functions and Vulkan objects will be stored
         }
     }
 
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, VkBuffer& VertBuff, VkBuffer& IndiBuff, std::vector<VkDescriptorSet>& DescSets,std::vector<uint16_t> Inds) {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = 0; // Optional
@@ -1096,11 +1143,11 @@ private: // Where all functions and Vulkan objects will be stored
 
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
-        VkBuffer vertexBuffers[] = { vertexBuffer };
+        VkBuffer vertexBuffers[] = { VertBuff };
         VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-        vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16); // Change this too if more than 65536 verts
+        vkCmdBindIndexBuffer(commandBuffer, IndiBuff, 0, VK_INDEX_TYPE_UINT16); // Change this too if more than 65536 verts
 
         VkViewport viewport{};
         viewport.x = 0.0f;
@@ -1116,9 +1163,9 @@ private: // Where all functions and Vulkan objects will be stored
         scissor.extent = swapChainExtent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &DescSets[currentFrame], 0, nullptr);
 
-        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0); // Draw command
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(Inds.size()), 1, 0, 0, 0); // Draw command
 
         vkCmdEndRenderPass(commandBuffer);
 
@@ -1256,8 +1303,8 @@ private: // Where all functions and Vulkan objects will be stored
         endSingleTimeCommands(commandBuffer);
     }
 
-    void createVertexBuffer() {
-        VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+    void createVertexBuffer(std::vector<Vertex>& Verts, VkBuffer& VertBuffer, VkDeviceMemory& VertMem) {
+        VkDeviceSize bufferSize = sizeof(Verts[0]) * Verts.size();
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
@@ -1265,20 +1312,20 @@ private: // Where all functions and Vulkan objects will be stored
 
         void* data;
         vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
-        memcpy(data, vertices.data(), (size_t)bufferSize);
+        memcpy(data, Verts.data(), (size_t)bufferSize);
         vkUnmapMemory(device, stagingBufferMemory);
 
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertBuffer, VertMem);
 
-        copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
+        copyBuffer(stagingBuffer, VertBuffer, bufferSize);
 
         // Clean up
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
-    }
+    } // Done
 
-    void createIndexBuffer() {
-        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+    void createIndexBuffer(std::vector<uint16_t>& Inds, VkBuffer& IndiBuffer, VkDeviceMemory& IndiMem) {
+        VkDeviceSize bufferSize = sizeof(Inds[0]) * Inds.size();
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
@@ -1286,49 +1333,55 @@ private: // Where all functions and Vulkan objects will be stored
 
         void* data;
         vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
-        memcpy(data, indices.data(), (size_t)bufferSize);
+        memcpy(data, Inds.data(), (size_t)bufferSize);
         vkUnmapMemory(device, stagingBufferMemory);
 
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, IndiBuffer, IndiMem);
 
-        copyBuffer(stagingBuffer, indexBuffer, bufferSize);
+        copyBuffer(stagingBuffer, IndiBuffer, bufferSize);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
-    }
+    } //Done
 
-    void createUniformBuffers() {
+    void createUniformBuffers(std::vector<VkBuffer>& UboBuffers, std::vector<VkDeviceMemory>& UboMem, std::vector<void*>& UboMap) {
         VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
-        uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-        uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
-        uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+        UboBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        UboMem.resize(MAX_FRAMES_IN_FLIGHT);
+        UboMap.resize(MAX_FRAMES_IN_FLIGHT);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
+            createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, UboBuffers[i], UboMem[i]);
 
-            vkMapMemory(device, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+            vkMapMemory(device, UboMem[i], 0, bufferSize, 0, &UboMap[i]);
         }
     }
 
-    void updateUniformBuffer(uint32_t currentImage) {
+    void updateUniformBuffer(uint32_t currentImage, std::vector<void*>& UboMap) {
+        /*
+        This will be where the code to apply transformations are
+        
+        */
         static auto startTime = std::chrono::high_resolution_clock::now();
 
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
+        // Create a dummy buffer that we can beat up with transformations
         UniformBufferObject ubo{};
         ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 
-        // set camera
+        // set camera -- how this dummy will be displayed
         ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 
-        // project onto screen
+        // project onto screen -- galunga
         ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
 
         ubo.proj[1][1] *= -1; // flip Y because OPENGL uses inverted Y and this library was made for it.
 
-        memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+        // copy dummy transformed buffer to existing buffer to make transformed, this only requires the map for some reason??
+        memcpy(UboMap[currentImage], &ubo, sizeof(ubo));
     }
 
     void createDescriptorSetLayout() {
@@ -1356,7 +1409,7 @@ private: // Where all functions and Vulkan objects will be stored
         }
     }
 
-    void createDescriptorPool() {
+    void createDescriptorPool(VkDescriptorPool& DescPool) {
         std::array<VkDescriptorPoolSize, 2> poolSizes{};
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
@@ -1372,40 +1425,43 @@ private: // Where all functions and Vulkan objects will be stored
         poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
         poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
-        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
+        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &DescPool) != VK_SUCCESS) {
             throw std::runtime_error("failed to create descriptor pool!");
         }
     }
 
-    void createDescriptorSets() {
+    void createDescriptorSets(VkDescriptorPool DescPool, std::vector<VkDescriptorSet>& DescSets, std::vector<VkBuffer> UboBuffers, VkImageView TexView) {
+        /*
+        This function creates the descriptor sets that bind the textures to the verticies to the ubo
+        */
         std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
         VkDescriptorSetAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
+        allocInfo.descriptorPool = DescPool;
         allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
         allocInfo.pSetLayouts = layouts.data();
 
-        descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+        DescSets.resize(MAX_FRAMES_IN_FLIGHT);
 
-        if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+        if (vkAllocateDescriptorSets(device, &allocInfo, DescSets.data()) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate descriptor sets!");
         }
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             VkDescriptorBufferInfo bufferInfo{};
-            bufferInfo.buffer = uniformBuffers[i];
+            bufferInfo.buffer = UboBuffers[i];
             bufferInfo.offset = 0;
             bufferInfo.range = sizeof(UniformBufferObject);
 
             VkDescriptorImageInfo imageInfo{};
             imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageInfo.imageView = textureImageView;
-            imageInfo.sampler = textureSampler;
+            imageInfo.imageView = TexView;
+            imageInfo.sampler = textureSampler; // I hope I do not have to change this.
 
             std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
 
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[0].dstSet = descriptorSets[i];
+            descriptorWrites[0].dstSet = DescSets[i];
             descriptorWrites[0].dstBinding = 0;
             descriptorWrites[0].dstArrayElement = 0;
             descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -1413,7 +1469,7 @@ private: // Where all functions and Vulkan objects will be stored
             descriptorWrites[0].pBufferInfo = &bufferInfo;
 
             descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[1].dstSet = descriptorSets[i];
+            descriptorWrites[1].dstSet = DescSets[i];
             descriptorWrites[1].dstBinding = 1;
             descriptorWrites[1].dstArrayElement = 0;
             descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -1469,11 +1525,11 @@ private: // Where all functions and Vulkan objects will be stored
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
         // Update Uniform Buffer
-        updateUniformBuffer(currentFrame);
+        updateUniformBuffer(currentFrame,Head.uniformBuffersMapped); // fix to iterate over all models
 
         //3
         vkResetCommandBuffer(commandBuffers[currentFrame], 0);
-        recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
+        recordCommandBuffer(commandBuffers[currentFrame], imageIndex,Head.vertBuff,Head.indBuff,Head.descriptorSets,Head.inds);
 
         //4
         VkSubmitInfo submitInfo{};
@@ -1518,9 +1574,9 @@ private: // Where all functions and Vulkan objects will be stored
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
-    void createTextureImage() {
+    void createTextureImage(const char* path, VkImage& Tex, VkDeviceMemory& TexMem) {
         int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load("textures/texture.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        stbi_uc* pixels = stbi_load(path, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         VkDeviceSize imageSize = texWidth * texHeight * 4;
 
         if (!pixels) {
@@ -1538,20 +1594,20 @@ private: // Where all functions and Vulkan objects will be stored
 
         stbi_image_free(pixels);
 
-        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory);
+        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, Tex, TexMem);
 
-        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+        transitionImageLayout(Tex, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        copyBufferToImage(stagingBuffer, Tex, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
 
-        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        transitionImageLayout(Tex, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
-    }
+    } // Fixed
 
-    void createTextureImageView() {
-        textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
-    }
+    void createTextureImageView(VkImageView& TexView, VkImage& Tex) {
+        TexView = createImageView(Tex, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+    } // done
 
     void createTextureSampler() {
         VkSamplerCreateInfo samplerInfo{};
@@ -1585,7 +1641,7 @@ private: // Where all functions and Vulkan objects will be stored
         if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
             throw std::runtime_error("failed to create texture sampler!");
         }
-    }
+    } // No changes needed.
 
     void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
         VkImageCreateInfo imageInfo{};
@@ -1760,8 +1816,25 @@ private: // Where all functions and Vulkan objects will be stored
         return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
     }
 
+    void INIT_GOOBER(Goober& goob) {
+        std::cout << "Loading Textures..." << std::endl;
+        createTextureImage(goob.TexturePath.c_str(), goob.texture, goob.textureMemory); // done
+        createTextureImageView(goob.textureView, goob.texture); // done
+        std::cout << "Creating Vertex Buffer..." << std::endl;
+        createVertexBuffer(goob.verts, goob.vertBuff, goob.vertMem); // this will take in a list of vertices
+        std::cout << "Creating Index Buffer..." << std::endl;
+        createIndexBuffer(goob.inds, goob.indBuff, goob.indMem); // Done
+        std::cout << "Creating Uniform Buffers..." << std::endl;
+        createUniformBuffers(goob.uniformBuffers, goob.uniformBuffersMemory, goob.uniformBuffersMapped); //done
+        std::cout << "Creating Descriptor Pool..." << std::endl;
+        createDescriptorPool(goob.descriptorPool); //done
+        std::cout << "Creating Descriptor Sets..." << std::endl;
+        createDescriptorSets(goob.descriptorPool, goob.descriptorSets, goob.uniformBuffers, goob.textureView); // submitting 4 args for some reason
+    }
     // Main functions
     void initVulkan() {
+        Head.verts = vertices;
+        Head.inds = indices;
         std::cout << "Creating Instance..." << std::endl;
         createInstance(); // create vulkan instance
         std::cout << "Setting Up Debug Messenger..." << std::endl;
@@ -1789,20 +1862,16 @@ private: // Where all functions and Vulkan objects will be stored
         createCommandPool();
         std::cout << "Creating Depth Resources..." << std::endl;
         createDepthResources();
-        std::cout << "Loading Textures..." << std::endl;
-        createTextureImage();
-        createTextureImageView();
+        std::cout << "Creating Texture Sampler..." << std::endl;
         createTextureSampler();
-        std::cout << "Creating Vertex Buffer..." << std::endl;
-        createVertexBuffer();
-        std::cout << "Creating Index Buffer..." << std::endl;
-        createIndexBuffer();
-        std::cout << "Creating Uniform Buffers..." << std::endl;
-        createUniformBuffers();
-        std::cout << "Creating Descriptor Pool..." << std::endl;
-        createDescriptorPool();
-        std::cout << "Creating Descriptor Sets..." << std::endl;
-        createDescriptorSets();
+
+        // !!! GOOBER ZONE !!!
+
+        Head.TexturePath = "Textures/texture.png";
+        INIT_GOOBER(Head);
+
+        // !!! GOOBERLESS ZONE !!!
+
         std::cout << "Creating Command Buffers..." << std::endl;
         createCommandBuffers();
         std::cout << "Creating Sync Objects..." << std::endl;
@@ -1836,51 +1905,36 @@ private: // Where all functions and Vulkan objects will be stored
 
     void cleanup() {
         cleanupSwapChain();
-        std::cout << "1839" << std::endl;
+        
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyRenderPass(device, renderPass, nullptr);
-        std::cout << "1843" << std::endl;
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vkDestroyBuffer(device, uniformBuffers[i], nullptr);
-            vkFreeMemory(device, uniformBuffersMemory[i], nullptr);
-        }
-        std::cout << "1848" << std::endl;
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-        std::cout << "1850" << std::endl;
-        vkDestroySampler(device, textureSampler, nullptr);
-        vkDestroyImageView(device, textureImageView, nullptr);
-        std::cout << "1853" << std::endl;
-        vkDestroyImage(device, textureImage, nullptr);
-        vkFreeMemory(device, textureImageMemory, nullptr);
-        std::cout << "1856" << std::endl;
-        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        std::cout << "1858" << std::endl;
-        vkDestroyBuffer(device, indexBuffer, nullptr);
-        vkFreeMemory(device, indexBufferMemory, nullptr);
-        std::cout << "1861" << std::endl;
-        vkDestroyBuffer(device, vertexBuffer, nullptr);
-        vkFreeMemory(device, vertexBufferMemory, nullptr);
-        std::cout << "1864" << std::endl;
+        
+        // GOOBER ZONE
+        Head.KILL_GOOBER(device, MAX_FRAMES_IN_FLIGHT);
+        
+        vkDestroySampler(device, textureSampler, nullptr); // not this
+        
+        // not goober terrirotruy
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
             vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
             vkDestroyFence(device, inFlightFences[i], nullptr);
         }
-        std::cout << "1870" << std::endl;
+        
         vkDestroyCommandPool(device, commandPool, nullptr);
-        std::cout << "1872" << std::endl;
+        
         vkDestroyDevice(device, nullptr);
-        std::cout << "1874" << std::endl;
+        
         if (enableValidationLayers) {
             DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
         }
-        std::cout << "1878" << std::endl;
+        
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyInstance(instance, nullptr);
-        std::cout << "1881" << std::endl;
+        
         glfwDestroyWindow(window);
-        std::cout << "1883" << std::endl;
+        
         glfwTerminate();
     }
 };
