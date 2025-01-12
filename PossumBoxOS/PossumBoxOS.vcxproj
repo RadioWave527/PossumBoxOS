@@ -131,7 +131,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\dunca\VS2022\libraries\stb\stb-master;C:\VulkanSDK\1.3.296.0\Include;C:\Users\dunca\VS2022\libraries\glm;C:\Users\dunca\VS2022\libraries\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\dunca\VS2022\libraries\tinyobjloader\tinyobjloader-release;C:\Users\dunca\VS2022\libraries\stb\stb-master;C:\VulkanSDK\1.3.296.0\Include;C:\Users\dunca\VS2022\libraries\glm;C:\Users\dunca\VS2022\libraries\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -165,7 +165,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\dunca\VS2022\libraries\stb\stb-master;C:\VulkanSDK\1.3.296.0\Include;C:\Users\dunca\VS2022\libraries\glm;C:\Users\dunca\VS2022\libraries\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\dunca\VS2022\libraries\tinyobjloader\tinyobjloader-release;C:\Users\dunca\VS2022\libraries\stb\stb-master;C:\VulkanSDK\1.3.296.0\Include;C:\Users\dunca\VS2022\libraries\glm;C:\Users\dunca\VS2022\libraries\glfw-3.4.bin.WIN64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
