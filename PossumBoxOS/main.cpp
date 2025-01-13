@@ -24,12 +24,22 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
+#include <unordered_map>
+
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
+
 /* This program looks really long and stinky but it is 99% just this:
 *  Create struct
 * Fill out struct with data and enums and stuff
 * create variable to store vulkan created item in
 * call vk_dosomething(blah, blah, &variable, blah)
 * destroy item on program exit
+* 
+* Z is up
+* 
 */
 
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
@@ -83,7 +93,19 @@ struct Vertex {
 
         return attributeDescriptions;
     }
+    bool operator==(const Vertex& other) const {
+        return pos == other.pos && color == other.color && texCoord == other.texCoord;
+    }
 };
+namespace std {
+    template<> struct hash<Vertex> {
+        size_t operator()(Vertex const& vertex) const {
+            return ((hash<glm::vec3>()(vertex.pos) ^
+                (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+                (hash<glm::vec2>()(vertex.texCoord) << 1);
+        }
+    };
+}
 
 // Uniform Buffers
 struct UniformBufferObject {
@@ -103,7 +125,7 @@ struct Goober {
     std::vector<Vertex> verts;
     VkBuffer vertBuff;
     VkDeviceMemory vertMem;
-    std::vector<uint16_t> inds;
+    std::vector<uint32_t> inds;
     VkBuffer indBuff;
     VkDeviceMemory indMem;
 
@@ -294,36 +316,6 @@ private: // Where all functions and Vulkan objects will be stored
     // Window settings
     const uint32_t WIDTH = 1280;
     const uint32_t HEIGHT = 720;
-
-    // Vertex Shader
-   
-    VkBuffer vertexBuffer;
-    VkDeviceMemory vertexBufferMemory;
-    VkBuffer indexBuffer;
-    VkDeviceMemory indexBufferMemory;
-
-    std::vector<VkBuffer> uniformBuffers;
-    std::vector<VkDeviceMemory> uniformBuffersMemory;
-    std::vector<void*> uniformBuffersMapped;
-
-    // Vertex Array
-    const std::vector<Vertex> vertices = {
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-
-    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-    };
-
-    // NOTE: swap to <uint32_t> when more than 65535 indicies
-    const std::vector<uint16_t> indices = {
-    0, 1, 2, 2, 3, 0,
-    4, 5, 6, 6, 7, 4
-    };
 
     // Functions (in order of being written):
     void initWindow() {
@@ -1108,7 +1100,7 @@ private: // Where all functions and Vulkan objects will be stored
         }
     }
 
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, VkBuffer& VertBuff, VkBuffer& IndiBuff, std::vector<VkDescriptorSet>& DescSets,std::vector<uint16_t> Inds) {
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, VkBuffer& VertBuff, VkBuffer& IndiBuff, std::vector<VkDescriptorSet>& DescSets,std::vector<uint32_t> Inds) {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = 0; // Optional
@@ -1147,7 +1139,7 @@ private: // Where all functions and Vulkan objects will be stored
         VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-        vkCmdBindIndexBuffer(commandBuffer, IndiBuff, 0, VK_INDEX_TYPE_UINT16); // Change this too if more than 65536 verts
+        vkCmdBindIndexBuffer(commandBuffer, IndiBuff, 0, VK_INDEX_TYPE_UINT32);
 
         VkViewport viewport{};
         viewport.x = 0.0f;
@@ -1324,7 +1316,7 @@ private: // Where all functions and Vulkan objects will be stored
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     } // Done
 
-    void createIndexBuffer(std::vector<uint16_t>& Inds, VkBuffer& IndiBuffer, VkDeviceMemory& IndiMem) {
+    void createIndexBuffer(std::vector<uint32_t>& Inds, VkBuffer& IndiBuffer, VkDeviceMemory& IndiMem) {
         VkDeviceSize bufferSize = sizeof(Inds[0]) * Inds.size();
 
         VkBuffer stagingBuffer;
@@ -1358,6 +1350,7 @@ private: // Where all functions and Vulkan objects will be stored
         }
     }
 
+    // update() basically
     void updateUniformBuffer(uint32_t currentImage, std::vector<void*>& UboMap) {
         /*
         This will be where the code to apply transformations are
@@ -1816,11 +1809,51 @@ private: // Where all functions and Vulkan objects will be stored
         return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
     }
 
+    void loadModel(std::string path, std::vector<Vertex>& verts, std::vector<uint32_t>& inds) {
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
+
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.c_str())) {
+            throw std::runtime_error(warn + err);
+        }
+
+        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
+        for (const auto& shape : shapes) {
+            for (const auto& index : shape.mesh.indices) {
+                Vertex vertex{};
+
+                vertex.pos = {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2]
+                };
+
+                vertex.texCoord = {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+                };
+
+                vertex.color = { 1.0f, 1.0f, 1.0f };
+
+                if (uniqueVertices.count(vertex) == 0) {
+                    uniqueVertices[vertex] = static_cast<uint32_t>(verts.size());
+                    verts.push_back(vertex);
+                }
+
+                inds.push_back(uniqueVertices[vertex]);
+            }
+        }
+    }
+
     void INIT_GOOBER(Goober& goob) {
         std::cout << "Loading Textures..." << std::endl;
         createTextureImage(goob.TexturePath.c_str(), goob.texture, goob.textureMemory); // done
         createTextureImageView(goob.textureView, goob.texture); // done
         std::cout << "Creating Vertex Buffer..." << std::endl;
+        loadModel(goob.ModelPath,goob.verts,goob.inds);
         createVertexBuffer(goob.verts, goob.vertBuff, goob.vertMem); // this will take in a list of vertices
         std::cout << "Creating Index Buffer..." << std::endl;
         createIndexBuffer(goob.inds, goob.indBuff, goob.indMem); // Done
@@ -1833,8 +1866,6 @@ private: // Where all functions and Vulkan objects will be stored
     }
     // Main functions
     void initVulkan() {
-        Head.verts = vertices;
-        Head.inds = indices;
         std::cout << "Creating Instance..." << std::endl;
         createInstance(); // create vulkan instance
         std::cout << "Setting Up Debug Messenger..." << std::endl;
@@ -1867,7 +1898,8 @@ private: // Where all functions and Vulkan objects will be stored
 
         // !!! GOOBER ZONE !!!
 
-        Head.TexturePath = "Textures/texture.png";
+        Head.TexturePath = "Textures/octo_base.png";
+        Head.ModelPath = "Models/octo.obj";
         INIT_GOOBER(Head);
 
         // !!! GOOBERLESS ZONE !!!
