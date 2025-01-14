@@ -129,9 +129,15 @@ struct Goober {
     VkBuffer indBuff;
     VkDeviceMemory indMem;
 
+    VkCommandPool commandPool; // hell yeah baby
+    std::vector<VkCommandBuffer> commandBuffers;
+
     std::vector<VkBuffer> uniformBuffers; // one for each frame in flight
     std::vector<VkDeviceMemory> uniformBuffersMemory;
     std::vector<void*> uniformBuffersMapped;
+    
+    // The Transform Basically
+    UniformBufferObject ubo;
 
     //Descriptor Sets
     VkDescriptorSetLayout descriptorSetLayout;
@@ -158,10 +164,8 @@ struct Goober {
 
         vkDestroyBuffer(dev, vertBuff, nullptr);
         vkFreeMemory(dev, vertMem, nullptr);
-    }
 
-    void CREATE_GOOBER() {
-
+        vkDestroyCommandPool(dev, commandPool, nullptr);
     }
 };
 
@@ -179,7 +183,9 @@ public:
 
 private: // Where all functions and Vulkan objects will be stored
     // !!! GOOBER ZONE!!!
-    Goober Head;
+    Goober Background;
+    std::vector<Goober> Goobers; // brain damage
+
     // Vulkan objects and variables (in order of being written):
     GLFWwindow* window;
     VkInstance instance;
@@ -1071,7 +1077,7 @@ private: // Where all functions and Vulkan objects will be stored
         }
     }
 
-    void createCommandPool() {
+    void createCommandPool(VkCommandPool& CmdPool) {
         QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
 
         VkCommandPoolCreateInfo poolInfo{};
@@ -1079,23 +1085,23 @@ private: // Where all functions and Vulkan objects will be stored
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
 
-        if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
+        if (vkCreateCommandPool(device, &poolInfo, nullptr, &CmdPool) != VK_SUCCESS) {
             throw std::runtime_error("failed to create command pool!");
         }
 
 
     }
 
-    void createCommandBuffers() {
-        commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    void createCommandBuffers(std::vector<VkCommandBuffer>& CmdBuffs, VkCommandPool& CmdPool) {
+        CmdBuffs.resize(MAX_FRAMES_IN_FLIGHT);
 
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool = commandPool;
+        allocInfo.commandPool = CmdPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandBufferCount = (uint32_t)commandBuffers.size();
+        allocInfo.commandBufferCount = (uint32_t)CmdBuffs.size();
 
-        if (vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) != VK_SUCCESS) {
+        if (vkAllocateCommandBuffers(device, &allocInfo, CmdBuffs.data()) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate command buffers!");
         }
     }
@@ -1252,11 +1258,11 @@ private: // Where all functions and Vulkan objects will be stored
         vkBindBufferMemory(device, buffer, bufferMemory, 0);
     }
 
-    VkCommandBuffer beginSingleTimeCommands() {
+    VkCommandBuffer beginSingleTimeCommands(VkCommandPool CmdPool) {
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandPool = commandPool;
+        allocInfo.commandPool = CmdPool;
         allocInfo.commandBufferCount = 1;
 
         VkCommandBuffer commandBuffer;
@@ -1271,7 +1277,7 @@ private: // Where all functions and Vulkan objects will be stored
         return commandBuffer;
     }
 
-    void endSingleTimeCommands(VkCommandBuffer commandBuffer) {
+    void endSingleTimeCommands(VkCommandBuffer commandBuffer, VkCommandPool& CmdPool) {
         vkEndCommandBuffer(commandBuffer);
 
         VkSubmitInfo submitInfo{};
@@ -1282,20 +1288,20 @@ private: // Where all functions and Vulkan objects will be stored
         vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
         vkQueueWaitIdle(graphicsQueue);
 
-        vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+        vkFreeCommandBuffers(device, CmdPool, 1, &commandBuffer);
     }
 
-    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
-        VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size,VkCommandPool& CmdPool) {
+        VkCommandBuffer commandBuffer = beginSingleTimeCommands(CmdPool);
 
         VkBufferCopy copyRegion{};
         copyRegion.size = size;
         vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
-        endSingleTimeCommands(commandBuffer);
+        endSingleTimeCommands(commandBuffer, CmdPool);
     }
 
-    void createVertexBuffer(std::vector<Vertex>& Verts, VkBuffer& VertBuffer, VkDeviceMemory& VertMem) {
+    void createVertexBuffer(std::vector<Vertex>& Verts, VkBuffer& VertBuffer, VkDeviceMemory& VertMem, VkCommandPool& CmdPool) {
         VkDeviceSize bufferSize = sizeof(Verts[0]) * Verts.size();
 
         VkBuffer stagingBuffer;
@@ -1309,14 +1315,14 @@ private: // Where all functions and Vulkan objects will be stored
 
         createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertBuffer, VertMem);
 
-        copyBuffer(stagingBuffer, VertBuffer, bufferSize);
+        copyBuffer(stagingBuffer, VertBuffer, bufferSize,CmdPool);
 
         // Clean up
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     } // Done
 
-    void createIndexBuffer(std::vector<uint32_t>& Inds, VkBuffer& IndiBuffer, VkDeviceMemory& IndiMem) {
+    void createIndexBuffer(std::vector<uint32_t>& Inds, VkBuffer& IndiBuffer, VkDeviceMemory& IndiMem, VkCommandPool& CmdPool) {
         VkDeviceSize bufferSize = sizeof(Inds[0]) * Inds.size();
 
         VkBuffer stagingBuffer;
@@ -1330,7 +1336,7 @@ private: // Where all functions and Vulkan objects will be stored
 
         createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, IndiBuffer, IndiMem);
 
-        copyBuffer(stagingBuffer, IndiBuffer, bufferSize);
+        copyBuffer(stagingBuffer, IndiBuffer, bufferSize,CmdPool);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
@@ -1351,7 +1357,7 @@ private: // Where all functions and Vulkan objects will be stored
     }
 
     // update() basically
-    void updateUniformBuffer(uint32_t currentImage, std::vector<void*>& UboMap) {
+    void updateUniformBuffer(uint32_t currentImage, std::vector<void*>& UboMap, UniformBufferObject ubo) {
         /*
         This will be where the code to apply transformations are
         
@@ -1360,20 +1366,11 @@ private: // Where all functions and Vulkan objects will be stored
 
         auto currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
-        // Create a dummy buffer that we can beat up with transformations
-        UniformBufferObject ubo{};
-        ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-
-        // set camera -- how this dummy will be displayed
-        ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-
-        // project onto screen -- galunga
-        ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
-
-        ubo.proj[1][1] *= -1; // flip Y because OPENGL uses inverted Y and this library was made for it.
-
         // copy dummy transformed buffer to existing buffer to make transformed, this only requires the map for some reason??
+        ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.view = glm::lookAt(glm::vec3(3.5f, 0.0f, 0.33f), glm::vec3(0.0f, 0.0f, 0.33f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.proj = glm::perspective(glm::radians(22.9f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
+        ubo.proj[1][1] *= -1;
         memcpy(UboMap[currentImage], &ubo, sizeof(ubo));
     }
 
@@ -1518,12 +1515,11 @@ private: // Where all functions and Vulkan objects will be stored
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
         // Update Uniform Buffer
-        updateUniformBuffer(currentFrame,Head.uniformBuffersMapped); // fix to iterate over all models
-
+        //updateUniformBuffer(currentFrame,Head.uniformBuffersMapped,Head.ubo); // fix to iterate over all models
+        updateUniformBuffer(currentFrame, Background.uniformBuffersMapped, Background.ubo); // fix to iterate over all models
         //3
-        vkResetCommandBuffer(commandBuffers[currentFrame], 0);
-        recordCommandBuffer(commandBuffers[currentFrame], imageIndex,Head.vertBuff,Head.indBuff,Head.descriptorSets,Head.inds);
-
+        vkResetCommandBuffer(Background.commandBuffers[currentFrame], 0);
+        recordCommandBuffer(Background.commandBuffers[currentFrame], imageIndex, Background.vertBuff, Background.indBuff, Background.descriptorSets, Background.inds);//guh
         //4
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1535,7 +1531,7 @@ private: // Where all functions and Vulkan objects will be stored
         submitInfo.pWaitDstStageMask = waitStages;
 
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
+        submitInfo.pCommandBuffers = &Background.commandBuffers[currentFrame]; // galungo
 
         VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
         submitInfo.signalSemaphoreCount = 1;
@@ -1567,7 +1563,7 @@ private: // Where all functions and Vulkan objects will be stored
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
-    void createTextureImage(const char* path, VkImage& Tex, VkDeviceMemory& TexMem) {
+    void createTextureImage(const char* path, VkImage& Tex, VkDeviceMemory& TexMem, VkCommandPool& CmdPool) {
         int texWidth, texHeight, texChannels;
         stbi_uc* pixels = stbi_load(path, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         VkDeviceSize imageSize = texWidth * texHeight * 4;
@@ -1589,10 +1585,10 @@ private: // Where all functions and Vulkan objects will be stored
 
         createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, Tex, TexMem);
 
-        transitionImageLayout(Tex, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        copyBufferToImage(stagingBuffer, Tex, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+        transitionImageLayout(Tex, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,CmdPool);
+        copyBufferToImage(stagingBuffer, Tex, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight),CmdPool);
 
-        transitionImageLayout(Tex, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        transitionImageLayout(Tex, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,CmdPool);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
@@ -1692,8 +1688,8 @@ private: // Where all functions and Vulkan objects will be stored
         return imageView;
     }
 
-    void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
-        VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+    void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout,VkCommandPool& CmdPool) {
+        VkCommandBuffer commandBuffer = beginSingleTimeCommands(CmdPool);
 
         VkImageMemoryBarrier barrier{};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1743,11 +1739,11 @@ private: // Where all functions and Vulkan objects will be stored
             1, &barrier
         );
 
-        endSingleTimeCommands(commandBuffer);
+        endSingleTimeCommands(commandBuffer,CmdPool);
     }
 
-    void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
-        VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+    void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height, VkCommandPool& CmdPool) {
+        VkCommandBuffer commandBuffer = beginSingleTimeCommands(CmdPool);
 
         VkBufferImageCopy region{};
         region.bufferOffset = 0;
@@ -1775,7 +1771,7 @@ private: // Where all functions and Vulkan objects will be stored
             &region
         );
 
-        endSingleTimeCommands(commandBuffer);
+        endSingleTimeCommands(commandBuffer,CmdPool);
     }
 
     void createDepthResources() {
@@ -1849,20 +1845,24 @@ private: // Where all functions and Vulkan objects will be stored
     }
 
     void INIT_GOOBER(Goober& goob) {
+        std::cout << "Creating Command Pool..." << std::endl;
+        createCommandPool(goob.commandPool);
         std::cout << "Loading Textures..." << std::endl;
-        createTextureImage(goob.TexturePath.c_str(), goob.texture, goob.textureMemory); // done
+        createTextureImage(goob.TexturePath.c_str(), goob.texture, goob.textureMemory,goob.commandPool); // done
         createTextureImageView(goob.textureView, goob.texture); // done
         std::cout << "Creating Vertex Buffer..." << std::endl;
         loadModel(goob.ModelPath,goob.verts,goob.inds);
-        createVertexBuffer(goob.verts, goob.vertBuff, goob.vertMem); // this will take in a list of vertices
+        createVertexBuffer(goob.verts, goob.vertBuff, goob.vertMem,goob.commandPool); // this will take in a list of vertices
         std::cout << "Creating Index Buffer..." << std::endl;
-        createIndexBuffer(goob.inds, goob.indBuff, goob.indMem); // Done
+        createIndexBuffer(goob.inds, goob.indBuff, goob.indMem,goob.commandPool); // Done
         std::cout << "Creating Uniform Buffers..." << std::endl;
         createUniformBuffers(goob.uniformBuffers, goob.uniformBuffersMemory, goob.uniformBuffersMapped); //done
         std::cout << "Creating Descriptor Pool..." << std::endl;
         createDescriptorPool(goob.descriptorPool); //done
         std::cout << "Creating Descriptor Sets..." << std::endl;
         createDescriptorSets(goob.descriptorPool, goob.descriptorSets, goob.uniformBuffers, goob.textureView); // submitting 4 args for some reason
+        std::cout << "Creating Command Buffers..." << std::endl;
+        createCommandBuffers(goob.commandBuffers,goob.commandPool);
     }
     // Main functions
     void initVulkan() {
@@ -1889,8 +1889,6 @@ private: // Where all functions and Vulkan objects will be stored
         createDepthResources();
         std::cout << "Creating Frame Buffers..." << std::endl;
         createFramebuffers();
-        std::cout << "Creating Command Pool..." << std::endl;
-        createCommandPool();
         std::cout << "Creating Depth Resources..." << std::endl;
         createDepthResources();
         std::cout << "Creating Texture Sampler..." << std::endl;
@@ -1898,14 +1896,25 @@ private: // Where all functions and Vulkan objects will be stored
 
         // !!! GOOBER ZONE !!!
 
-        Head.TexturePath = "Textures/octo_base.png";
-        Head.ModelPath = "Models/octo.obj";
-        INIT_GOOBER(Head);
+        Background.TexturePath = "Textures/background.png";
+        Background.ModelPath = "Models/background.obj";
+
+        // Transforms
+        Background.ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        Background.ubo.view = glm::lookAt(glm::vec3(3.5f, 0.0f, 0.33f), glm::vec3(0.0f, 0.0f, 0.33f), glm::vec3(0.0f, 0.0f, 1.0f));
+        Background.ubo.proj = glm::perspective(glm::radians(22.9f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
+        Background.ubo.proj[1][1] *= -1; // flip Y because OPENGL uses inverted Y and this library was made for it.
+
+        INIT_GOOBER(Background);
+
+        //for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+         //   std::cout << "guh" << i << std::endl;
+         //   memcpy(Background.uniformBuffersMapped[i], &Background.ubo, sizeof(Background.ubo));
+        //}
 
         // !!! GOOBERLESS ZONE !!!
 
-        std::cout << "Creating Command Buffers..." << std::endl;
-        createCommandBuffers();
+        
         std::cout << "Creating Sync Objects..." << std::endl;
         createSyncObjects();
     }
@@ -1943,8 +1952,7 @@ private: // Where all functions and Vulkan objects will be stored
         vkDestroyRenderPass(device, renderPass, nullptr);
         
         // GOOBER ZONE
-        Head.KILL_GOOBER(device, MAX_FRAMES_IN_FLIGHT);
-        
+        Background.KILL_GOOBER(device,MAX_FRAMES_IN_FLIGHT);
         vkDestroySampler(device, textureSampler, nullptr); // not this
         
         // not goober terrirotruy
@@ -1953,8 +1961,6 @@ private: // Where all functions and Vulkan objects will be stored
             vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
             vkDestroyFence(device, inFlightFences[i], nullptr);
         }
-        
-        vkDestroyCommandPool(device, commandPool, nullptr);
         
         vkDestroyDevice(device, nullptr);
         
